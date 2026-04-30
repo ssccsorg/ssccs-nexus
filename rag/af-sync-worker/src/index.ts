@@ -1,6 +1,10 @@
 // src/index.ts
 // Nexus Sync Worker – /sync/:engine pattern
 // Supports: EdgeQuake (/sync/eq), future: AutoRAG (/sync/auto), custom (/sync/local)
+//
+// Recursively scans ALL objects in the R2 bucket (paginated, no prefix filter)
+// and syncs them to the configured engine. Each sync run diffs the current R2
+// state against the previous KV mapping, then enqueues upload/delete tasks.
 
 import { EdgeQuakeHandler } from './engines/edgequake';
 
@@ -16,8 +20,6 @@ export interface Env {
   EDGEQUAKE_TENANT_ID: string;
   EDGEQUAKE_API_KEY: string;
   WORKSPACE_ID: string;
-  // Optional overrides
-  R2_PREFIX?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,15 +158,20 @@ export default {
 // ---------------------------------------------------------------------------
 async function runSync(engineName: string, env: Env): Promise<void> {
   const CHUNK_SIZE = 10; // ≤50 tasks per message to stay under subrequest limit
-  const R2_PREFIX = env.R2_PREFIX || 'ssccs/docs/';
 
-  // 1. R2 inventory – only objects under the configured prefix
-  const r2Objects = await env.ARTIFACT_BUCKET.list({ prefix: R2_PREFIX });
+  // 1. R2 inventory – recursively list ALL objects in the bucket (paginated)
   const r2Map = new Map<string, string>();
-  for (const obj of r2Objects.objects) {
-    r2Map.set(obj.key, obj.etag);
-  }
-  console.log(`[${engineName}] found ${r2Map.size} objects in R2 under "${R2_PREFIX}"`);
+  let cursor: string | undefined;
+  do {
+    const opts: R2ListOptions = { limit: 1000 };
+    if (cursor) { opts.cursor = cursor; }
+    const result = await env.ARTIFACT_BUCKET.list(opts);
+    for (const obj of result.objects) {
+      r2Map.set(obj.key, obj.etag);
+    }
+    cursor = result.truncated ? result.cursor : undefined;
+  } while (cursor);
+  console.log(`[${engineName}] found ${r2Map.size} objects in R2 bucket (full recursive scan)`);
 
   // 2. Previous mapping (KV)
   const prev: Record<string, { doc_id: string; etag: string }> =
