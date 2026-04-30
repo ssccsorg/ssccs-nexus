@@ -282,16 +282,17 @@ pub async fn list_documents(
         }
     }
 
-    // Filter documents by tenant context
-    let filter_workspace_id = tenant_ctx.workspace_id.clone();
-    let filter_tenant_id = tenant_ctx.tenant_id.clone();
+    // Filter documents by tenant context (using resolved UUIDs for consistency with storage)
+    let filter_workspace_id = tenant_ctx.workspace_id_or_default();
+    let filter_tenant_id = tenant_ctx.tenant_id_or_default();
 
     // SECURITY: STRICT tenant filtering - both tenant_id AND workspace_id must match
-    // This matches the strict filtering in entities.rs and relationships.rs (commit d11edba8)
+    // Both are stored as resolved UUIDs (from workspace_id_or_default / tenant_id_or_default)
+    // so we compare against the resolved UUID values from the request headers
     let matches_tenant_context = |meta: &DocMetadata| -> bool {
         // Both must match exactly (None is already handled by early return above)
-        meta.workspace_id.as_ref() == filter_workspace_id.as_ref()
-            && meta.tenant_id.as_ref() == filter_tenant_id.as_ref()
+        meta.workspace_id.as_ref() == Some(&filter_workspace_id)
+            && meta.tenant_id.as_ref() == Some(&filter_tenant_id)
     };
 
     // Build document list from BOTH:

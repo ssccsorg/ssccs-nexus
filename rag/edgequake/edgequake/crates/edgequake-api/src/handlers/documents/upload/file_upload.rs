@@ -109,7 +109,7 @@ pub async fn upload_file(
     // WHY-OODA81: Uniqueness must be scoped to workspace, not global
     // Same document in different workspaces is allowed (multi-tenancy)
     let workspace_id_for_storage = tenant_ctx.workspace_id_or_default();
-    let tenant_id_for_storage = tenant_ctx.tenant_id.clone();
+    let tenant_id_for_storage = tenant_ctx.tenant_id_or_default();
 
     // WHY-OODA81+83: Use ContentHasher for workspace-scoped hash key
     // FIX-4: Duplicates now trigger re-ingestion instead of rejection

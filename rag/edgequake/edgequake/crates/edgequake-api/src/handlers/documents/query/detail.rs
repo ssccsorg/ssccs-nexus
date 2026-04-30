@@ -76,26 +76,25 @@ pub async fn get_document(
     // Parse metadata if available
     let meta_obj = metadata.as_ref().and_then(|v| v.as_object());
 
-    // Check tenant context (multi-tenancy)
+    // Check tenant context (multi-tenancy) - compare using resolved UUIDs
     if let Some(obj) = meta_obj {
         let doc_tenant_id = obj.get("tenant_id").and_then(|v| v.as_str());
         let doc_workspace_id = obj.get("workspace_id").and_then(|v| v.as_str());
 
-        // Verify tenant access
-        if let Some(ref filter_tid) = tenant_ctx.tenant_id {
-            if let Some(doc_tid) = doc_tenant_id {
-                if doc_tid != filter_tid {
-                    return Err(ApiError::Forbidden);
-                }
+        let filter_tenant_id = tenant_ctx.tenant_id_or_default();
+        let filter_workspace_id = tenant_ctx.workspace_id_or_default();
+
+        // Verify tenant access (compare resolved UUIDs for consistency with storage)
+        if let Some(doc_tid) = doc_tenant_id {
+            if doc_tid != filter_tenant_id {
+                return Err(ApiError::Forbidden);
             }
         }
 
-        // Verify workspace access
-        if let Some(ref filter_ws) = tenant_ctx.workspace_id {
-            if let Some(doc_ws) = doc_workspace_id {
-                if doc_ws != filter_ws {
-                    return Err(ApiError::Forbidden);
-                }
+        // Verify workspace access (compare resolved UUIDs for consistency with storage)
+        if let Some(doc_ws) = doc_workspace_id {
+            if doc_ws != filter_workspace_id {
+                return Err(ApiError::Forbidden);
             }
         }
     }
