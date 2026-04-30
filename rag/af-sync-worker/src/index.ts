@@ -19,7 +19,7 @@ export interface Env {
 // ---------------------------------------------------------------------------
 // Engine Handler Interface (extend for new engines)
 // ---------------------------------------------------------------------------
-interface EngineHandler {
+export interface EngineHandler {
   /** List all indexed documents in the engine */
   listDocuments(env: Env): Promise<Array<{ id: string; title: string }>>;
   /** Delete a document by engine-native ID */
@@ -87,6 +87,60 @@ export default {
       { status: 202, headers: { 'Content-Type': 'application/json' } }
     );
   },
+
+  async queue(
+    batch: MessageBatch<{ chunk: SyncTask[]; engine: string }>,
+    env: Env
+  ): Promise<void> {
+    // Collect all updates from this batch to apply atomically at the end
+    const updates: Record<string, { doc_id: string; etag: string }> = {};
+
+    for (const msg of batch.messages) {
+      const { chunk, engine: engineName } = msg.body;
+      const handler = engines[engineName];
+      if (!handler) {
+        msg.ack();
+        continue;
+      }
+
+      for (const task of chunk) {
+        try {
+          if (task.type === 'delete' && task.id) {
+            await handler.deleteDocument(task.id, env);
+            // Remove from mapping if needed – we'll handle later
+          } else if (task.type === 'upload' && task.key) {
+            const obj = await env.ARTIFACT_BUCKET.get(task.key);
+            if (!obj) continue;
+            const newId = await handler.uploadDocument(
+              task.key,
+              await obj.arrayBuffer(),
+              env
+            );
+            // Get the current ETag of the uploaded object
+            const head = await env.ARTIFACT_BUCKET.head(task.key);
+            updates[task.key] = { doc_id: newId, etag: head?.etag ?? '' };
+          }
+        } catch (e) {
+          console.error(`[${engineName}] task failed: ${task.type}`, e);
+        }
+      }
+      msg.ack();
+    }
+
+    // Apply mapping updates in one write (still eventual consistent but reduces within-batch races)
+    if (Object.keys(updates).length > 0) {
+      // Read current mapping, merge, then write
+      const current =
+        (await env.SYNC_KV.get('mapping', 'json')) as Record<string, { doc_id: string; etag: string }> || {};
+      for (const [key, val] of Object.entries(updates)) {
+        current[key] = val;
+      }
+      // Also remove deleted keys that were in the batch (optional, but we don't have explicit deletes in updates)
+      // For deletes, we could also remove keys from mapping; but we didn't collect them in updates.
+      // A complete solution would also track deleted keys from tasks and remove them.
+      await env.SYNC_KV.put('mapping', JSON.stringify(current));
+    }
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -123,63 +177,6 @@ async function runSync(engineName: string, handler: EngineHandler, env: Env): Pr
   for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
     const chunk = tasks.slice(i, i + CHUNK_SIZE);
     await env.SYNC_QUEUE.send({ chunk, index: i / CHUNK_SIZE, engine: engineName });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Queue Consumer – processes individual chunks
-// ---------------------------------------------------------------------------
-export async function queue(
-  batch: MessageBatch<{ chunk: SyncTask[]; engine: string }>,
-  env: Env
-): Promise<void> {
-  // Collect all updates from this batch to apply atomically at the end
-  const updates: Record<string, { doc_id: string; etag: string }> = {};
-
-  for (const msg of batch.messages) {
-    const { chunk, engine: engineName } = msg.body;
-    const handler = engines[engineName];
-    if (!handler) {
-      msg.ack();
-      continue;
-    }
-
-    for (const task of chunk) {
-      try {
-        if (task.type === 'delete' && task.id) {
-          await handler.deleteDocument(task.id, env);
-          // Remove from mapping if needed – we'll handle later
-        } else if (task.type === 'upload' && task.key) {
-          const obj = await env.ARTIFACT_BUCKET.get(task.key);
-          if (!obj) continue;
-          const newId = await handler.uploadDocument(
-            task.key,
-            await obj.arrayBuffer(),
-            env
-          );
-          // Get the current ETag of the uploaded object
-          const head = await env.ARTIFACT_BUCKET.head(task.key);
-          updates[task.key] = { doc_id: newId, etag: head?.etag ?? '' };
-        }
-      } catch (e) {
-        console.error(`[${engineName}] task failed: ${task.type}`, e);
-      }
-    }
-    msg.ack();
-  }
-
-  // Apply mapping updates in one write (still eventual consistent but reduces within-batch races)
-  if (Object.keys(updates).length > 0) {
-    // Read current mapping, merge, then write
-    const current =
-      (await env.SYNC_KV.get('mapping', 'json')) as Record<string, { doc_id: string; etag: string }> || {};
-    for (const [key, val] of Object.entries(updates)) {
-      current[key] = val;
-    }
-    // Also remove deleted keys that were in the batch (optional, but we don't have explicit deletes in updates)
-    // For deletes, we could also remove keys from mapping; but we didn't collect them in updates.
-    // A complete solution would also track deleted keys from tasks and remove them.
-    await env.SYNC_KV.put('mapping', JSON.stringify(current));
   }
 }
 
