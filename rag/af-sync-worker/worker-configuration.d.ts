@@ -7,11 +7,14 @@ declare namespace Cloudflare {
 	}
 	interface Env {
 		SYNC_KV: KVNamespace;
-		EDGEQUAKE_API_HOST: "https://rag-api.nexus.ssccs.org";
-		WORKSPACE_ID: "nexus-af-sync";
-		SYNC_API_KEY: string;
 		ARTIFACT_BUCKET: R2Bucket;
 		SYNC_QUEUE: Queue;
+		SYNC_API_KEY: string;
+		EDGEQUAKE_API_HOST: string;
+		EDGEQUAKE_TENANT_ID: string;
+		EDGEQUAKE_API_KEY: string;
+		WORKSPACE_ID: string;
+		R2_PREFIX: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
