@@ -134,10 +134,13 @@ export class EdgeQuakeHandler {
     for (const r of data.results) {
       if (r.status === "success" && r.document_id) {
         results.push({ key: r.filename, document_id: r.document_id });
-      } else if (r.status === "duplicate") {
+      } else if (r.status === "duplicate" && r.duplicate_of) {
+        // Treat duplicate as success — map the file to the existing document
+        // so KV gets updated and the file won't be retried on the next sync.
         console.warn(
-          `[eq] batch upload: ${r.filename} → duplicate of ${r.duplicate_of || "unknown"}`,
+          `[eq] batch upload: ${r.filename} → duplicate of ${r.duplicate_of}`,
         );
+        results.push({ key: r.filename, document_id: r.duplicate_of });
       } else {
         console.warn(
           `[eq] batch upload: ${r.filename} → ${r.status}${r.error ? ` (${r.error})` : ""}`,
