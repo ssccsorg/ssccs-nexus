@@ -88,7 +88,7 @@ pub async fn upload_document(
 
     // Extract tenant context for storage (needed for hash_key)
     let workspace_id_for_storage = tenant_ctx.workspace_id_or_default();
-    let tenant_id_for_storage = tenant_ctx.tenant_id.clone();
+    let tenant_id_for_storage = Some(tenant_ctx.tenant_id_or_default());
 
     // WHY-OODA81+84: Workspace-scoped duplicate detection
     // FIX-4: Duplicates now trigger re-ingestion instead of rejection
