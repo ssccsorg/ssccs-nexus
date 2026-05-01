@@ -91,4 +91,59 @@ export class EdgeQuakeHandler {
     const { document_id } = (await res.json()) as { document_id: string };
     return document_id;
   }
+
+  async uploadDocuments(
+    files: Array<{ key: string; buffer: ArrayBuffer }>,
+    env: Env,
+  ): Promise<Array<{ key: string; document_id: string }>> {
+    const url = `${this.base(env)}/api/v1/documents/upload/batch`;
+
+    const formData = new FormData();
+    for (const f of files) {
+      formData.append("files", new Blob([f.buffer]), f.key);
+    }
+
+    const req = new Request(url, {
+      method: "POST",
+      body: formData,
+    });
+    req.headers.set("X-Tenant-ID", env.EDGEQUAKE_TENANT_ID || "default");
+    req.headers.set("X-Workspace-ID", env.WORKSPACE_ID || "default");
+    if (env.EDGEQUAKE_API_KEY) {
+      req.headers.set("X-API-Key", env.EDGEQUAKE_API_KEY);
+    }
+
+    const res = await fetch(req);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        `EdgeQuake batch upload failed: ${res.status} ${res.statusText} — ${body.slice(0, 200)}`,
+      );
+    }
+
+    const data = (await res.json()) as {
+      results: Array<{
+        filename: string;
+        document_id?: string;
+        status: string;
+        duplicate_of?: string;
+        error?: string;
+      }>;
+    };
+    const results: Array<{ key: string; document_id: string }> = [];
+    for (const r of data.results) {
+      if (r.status === "success" && r.document_id) {
+        results.push({ key: r.filename, document_id: r.document_id });
+      } else if (r.status === "duplicate") {
+        console.warn(
+          `[eq] batch upload: ${r.filename} → duplicate of ${r.duplicate_of || "unknown"}`,
+        );
+      } else {
+        console.warn(
+          `[eq] batch upload: ${r.filename} → ${r.status}${r.error ? ` (${r.error})` : ""}`,
+        );
+      }
+    }
+    return results;
+  }
 }

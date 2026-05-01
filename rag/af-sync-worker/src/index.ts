@@ -32,6 +32,12 @@ export interface EngineHandler {
   deleteDocument(id: string, env: Env): Promise<void>;
   /** Upload a document; returns the engine-native ID assigned */
   uploadDocument(key: string, buffer: ArrayBuffer, env: Env): Promise<string>;
+  /** Upload multiple documents in a single batch request (optional).
+   *  Returns only successfully uploaded files with their document IDs. */
+  uploadDocuments?(
+    files: Array<{ key: string; buffer: ArrayBuffer }>,
+    env: Env,
+  ): Promise<Array<{ key: string; document_id: string }>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,28 +116,64 @@ export default {
         continue;
       }
 
-      for (const task of chunk) {
+      // Separate deletes and uploads
+      const deleteTasks = chunk.filter(t => t.type === 'delete' && t.id);
+      const uploadTasks = chunk.filter(t => t.type === 'upload' && t.key);
+
+      // Process deletes individually
+      for (const task of deleteTasks) {
         try {
-          if (task.type === 'delete' && task.id) {
-            console.log(`[${engineName}] deleting doc ${task.id} (R2 key: ${task.key || 'unknown'})`);
-            await handler.deleteDocument(task.id, env);
-            if (task.key) deletedKeys.push(task.key);
-          } else if (task.type === 'upload' && task.key) {
-            console.log(`[${engineName}] uploading ${task.key}...`);
-            const obj = await env.ARTIFACT_BUCKET.get(task.key);
-            if (!obj) {
-              console.warn(`[${engineName}] R2 object not found: ${task.key}`);
-              continue;
+          console.log(`[${engineName}] deleting doc ${task.id} (R2 key: ${task.key || 'unknown'})`);
+          await handler.deleteDocument(task.id!, env);
+          if (task.key) deletedKeys.push(task.key);
+        } catch (e) {
+          console.error(`[${engineName}] delete failed: id=${task.id} key=${task.key}`, e);
+        }
+      }
+
+      // Process uploads — use batch endpoint if the engine supports it
+      if (uploadTasks.length > 0) {
+        try {
+          if (handler.uploadDocuments) {
+            // Batch mode: fetch all buffers, upload in one request
+            const files: Array<{ key: string; buffer: ArrayBuffer }> = [];
+            for (const task of uploadTasks) {
+              const obj = await env.ARTIFACT_BUCKET.get(task.key!);
+              if (!obj) {
+                console.warn(`[${engineName}] R2 object not found: ${task.key}`);
+                continue;
+              }
+              const buffer = await obj.arrayBuffer();
+              files.push({ key: task.key!, buffer });
             }
-            const buffer = await obj.arrayBuffer();
-            const newId = await handler.uploadDocument(task.key, buffer, env);
-            // Get the current ETag of the uploaded object
-            const head = await env.ARTIFACT_BUCKET.head(task.key);
-            updates[task.key] = { doc_id: newId, etag: head?.etag ?? '' };
-            console.log(`[${engineName}] uploaded ${task.key} → doc_id=${newId}`);
+
+            if (files.length > 0) {
+              console.log(`[${engineName}] batch uploading ${files.length} files...`);
+              const uploaded = await handler.uploadDocuments(files, env);
+              for (const { key, document_id } of uploaded) {
+                const head = await env.ARTIFACT_BUCKET.head(key);
+                updates[key] = { doc_id: document_id, etag: head?.etag ?? '' };
+                console.log(`[${engineName}] uploaded ${key} → doc_id=${document_id}`);
+              }
+            }
+          } else {
+            // Fallback: upload one by one
+            for (const task of uploadTasks) {
+              console.log(`[${engineName}] uploading ${task.key}...`);
+              const obj = await env.ARTIFACT_BUCKET.get(task.key!);
+              if (!obj) {
+                console.warn(`[${engineName}] R2 object not found: ${task.key}`);
+                continue;
+              }
+              const buffer = await obj.arrayBuffer();
+              const newId = await handler.uploadDocument(task.key!, buffer, env);
+              const head = await env.ARTIFACT_BUCKET.head(task.key!);
+              updates[task.key!] = { doc_id: newId, etag: head?.etag ?? '' };
+              console.log(`[${engineName}] uploaded ${task.key} → doc_id=${newId}`);
+            }
           }
         } catch (e) {
-          console.error(`[${engineName}] task failed: ${task.type} key=${task.key} id=${task.id}`, e);
+          console.error(`[${engineName}] upload batch/single failed`, e);
         }
       }
       msg.ack();
