@@ -1,12 +1,13 @@
 // src/index.ts
 // Nexus Sync Worker – /sync/:engine pattern
-// Supports: EdgeQuake (/sync/eq), future: AutoRAG (/sync/auto), custom (/sync/local)
+// Supports: LightRAG (/sync/lr) – primary, EdgeQuake (/sync/eq) – deprecated
 //
 // Recursively scans ALL objects in the R2 bucket (paginated, no prefix filter)
 // and syncs them to the configured engine. Each sync run diffs the current R2
 // state against the previous KV mapping, then enqueues upload/delete tasks.
 
 import { EdgeQuakeHandler } from "./engines/edgequake";
+import { LightRagHandler } from "./engines/lightrag";
 
 // ---------------------------------------------------------------------------
 // Shared environment type (used by all engine handlers)
@@ -16,10 +17,14 @@ export interface Env {
   SYNC_KV: KVNamespace;
   SYNC_QUEUE: Queue;
   SYNC_API_KEY: string;
+  // EdgeQuake (deprecated – kept for backward compat)
   EDGEQUAKE_API_HOST: string;
   EDGEQUAKE_TENANT_ID: string;
   EDGEQUAKE_API_KEY: string;
   WORKSPACE_ID: string;
+  // LightRAG (primary engine)
+  LIGHTRAG_API_HOST: string;
+  LIGHTRAG_API_KEY: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +49,8 @@ export interface EngineHandler {
 // Engine Registry – register new engines here
 // ---------------------------------------------------------------------------
 const engines: Record<string, EngineHandler> = {
-  eq: new EdgeQuakeHandler(), // EdgeQuake
+  lr: new LightRagHandler(), // LightRAG (primary)
+  eq: new EdgeQuakeHandler(), // EdgeQuake (deprecated – stability issues)
   // auto: new AutoRAGHandler(),       // Cloudflare AI Search (future)
   // local: new LocalHandler(),        // Local / custom engine (future)
 };
@@ -83,6 +89,15 @@ export default {
     }
 
     const engineName = match.pathname.groups["engine"]!;
+
+    // Deprecation notice for EdgeQuake
+    if (engineName === "eq") {
+      console.warn(
+        "[deprecated] /sync/eq is deprecated due to EdgeQuake stability issues. " +
+        "Use /sync/lr for LightRAG instead.",
+      );
+    }
+
     const handler = engines[engineName];
 
     if (!handler) {
@@ -90,6 +105,8 @@ export default {
         JSON.stringify({
           error: "Unknown engine",
           supported: Object.keys(engines),
+          deprecated: ["eq"],
+          recommended: "lr",
         }),
         { status: 400, headers: { "Content-Type": "application/json" } },
       );
@@ -111,9 +128,11 @@ export default {
     // Collect all updates from this batch to apply atomically at the end
     const updates: Record<string, { doc_id: string; etag: string }> = {};
     const deletedKeys: string[] = [];
+    let engineName = "";
 
     for (const msg of batch.messages) {
-      const { chunk, engine: engineName } = msg.body;
+      const { chunk, engine } = msg.body;
+      engineName = engine;
       const handler = engines[engineName];
       if (!handler) {
         msg.ack();
@@ -204,8 +223,9 @@ export default {
 
     // Apply mapping updates in one write (still eventual consistent but reduces within-batch races)
     if (Object.keys(updates).length > 0 || deletedKeys.length > 0) {
+      const MAPPING_KEY = `mapping:${engineName}`;
       const current =
-        ((await env.SYNC_KV.get("mapping", "json")) as Record<
+        ((await env.SYNC_KV.get(MAPPING_KEY, "json")) as Record<
           string,
           { doc_id: string; etag: string }
         >) || {};
@@ -216,7 +236,7 @@ export default {
       for (const key of deletedKeys) {
         delete current[key];
       }
-      await env.SYNC_KV.put("mapping", JSON.stringify(current));
+      await env.SYNC_KV.put(`mapping:${engineName}`, JSON.stringify(current));
     }
   },
 };
@@ -245,9 +265,10 @@ async function runSync(engineName: string, env: Env): Promise<void> {
     `[${engineName}] found ${r2Map.size} objects in R2 bucket (full recursive scan)`,
   );
 
-  // 2. Previous mapping (KV)
+  // 2. Previous mapping (KV) — per-engine namespace to avoid cross-contamination
+  const MAPPING_KEY = `mapping:${engineName}`;
   const prev: Record<string, { doc_id: string; etag: string }> =
-    (await env.SYNC_KV.get("mapping", "json")) || {};
+    (await env.SYNC_KV.get(MAPPING_KEY, "json")) || {};
   console.log(
     `[${engineName}] previous mapping has ${Object.keys(prev).length} entries`,
   );

@@ -10,11 +10,14 @@ declare namespace Cloudflare {
 		ARTIFACT_BUCKET: R2Bucket;
 		SYNC_QUEUE: Queue;
 		SYNC_API_KEY: string;
+		// EdgeQuake (deprecated)
 		EDGEQUAKE_API_HOST: string;
 		EDGEQUAKE_TENANT_ID: string;
 		EDGEQUAKE_API_KEY: string;
 		WORKSPACE_ID: string;
-		R2_PREFIX: string;
+		// LightRAG (primary)
+		LIGHTRAG_API_HOST: string;
+		LIGHTRAG_API_KEY: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
