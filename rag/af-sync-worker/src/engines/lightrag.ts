@@ -290,4 +290,35 @@ export class LightRagHandler {
 
     return results;
   }
+
+  // -------------------------------------------------------------------------
+  // reprocessFailedDocuments – retry failed/pending documents
+  // -------------------------------------------------------------------------
+  async reprocessFailedDocuments(env: Env): Promise<void> {
+    const url = `${this.base(env)}/documents/reprocess_failed`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(env.LIGHTRAG_API_KEY ? { "X-API-Key": env.LIGHTRAG_API_KEY } : {}),
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        `LightRAG reprocess failed: ${res.status} ${res.statusText} — ${body.slice(0, 300)}`,
+      );
+    }
+
+    const data = (await res.json()) as {
+      status: string;
+      message: string;
+    };
+
+    console.log(
+      `[lightrag] reprocessFailedDocuments: status=${data.status}, message="${data.message}"`,
+    );
+  }
 }

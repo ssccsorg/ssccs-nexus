@@ -43,6 +43,9 @@ export interface EngineHandler {
     files: Array<{ key: string; buffer: ArrayBuffer }>,
     env: Env,
   ): Promise<Array<{ key: string; document_id: string }>>;
+  /** Reprocess failed/pending documents in the engine (optional).
+   *  Called after sync completes to retry stuck documents. */
+  reprocessFailedDocuments?(env: Env): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +340,21 @@ async function runSync(engineName: string, env: Env): Promise<void> {
   for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
     const chunk = tasks.slice(i, i + CHUNK_SIZE);
     await env.SYNC_QUEUE.send({ chunk, engine: engineName });
+  }
+
+  // 6. Reprocess failed/pending documents in the engine
+  //     (e.g. documents stuck in FAILED state after transient errors)
+  if (handler.reprocessFailedDocuments) {
+    try {
+      console.log(`[${engineName}] reprocessing failed/pending documents...`);
+      await handler.reprocessFailedDocuments(env);
+      console.log(`[${engineName}] reprocess initiated successfully`);
+    } catch (e) {
+      console.warn(
+        `[${engineName}] reprocess failed documents returned an error:`,
+        e,
+      );
+    }
   }
 }
 
