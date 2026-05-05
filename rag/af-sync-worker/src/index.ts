@@ -94,7 +94,7 @@ export default {
     if (engineName === "eq") {
       console.warn(
         "[deprecated] /sync/eq is deprecated due to EdgeQuake stability issues. " +
-        "Use /sync/lr for LightRAG instead.",
+          "Use /sync/lr for LightRAG instead.",
       );
     }
 
@@ -273,10 +273,34 @@ async function runSync(engineName: string, env: Env): Promise<void> {
     `[${engineName}] previous mapping has ${Object.keys(prev).length} entries`,
   );
 
-  // 3. Diff
+  // 3. Engine inventory — list actual documents to detect drift
+  //    (e.g., engine data wiped while KV mapping still looks healthy)
+  const handler = engines[engineName];
+  if (!handler) {
+    console.error(`[${engineName}] unknown engine, aborting sync`);
+    return;
+  }
+  let engineListOk = false;
+  const engineDocIds = new Set<string>();
+  try {
+    const engineDocs = await handler.listDocuments(env);
+    for (const doc of engineDocs) {
+      engineDocIds.add(doc.id);
+    }
+    engineListOk = true;
+    console.log(`[${engineName}] engine has ${engineDocIds.size} documents`);
+  } catch (e) {
+    console.warn(
+      `[${engineName}] could not list engine documents, skipping drift check:`,
+      e,
+    );
+  }
+
+  // 4. Diff
   //    - Keys in prev but not in R2 → delete from engine
   //    - Keys in R2 but not in prev → upload
   //    - Keys in both but etag differs → delete old + upload new
+  //    - Keys in both with same etag but NOT in engine → upload (drift)
   const tasks: Array<{ type: "delete" | "upload"; id?: string; key?: string }> =
     [];
   for (const [key, p] of Object.entries(prev)) {
@@ -293,11 +317,23 @@ async function runSync(engineName: string, env: Env): Promise<void> {
       tasks.push({ type: "upload", key });
     }
   }
+  // Drift check: KV says synced but engine doesn't have it
+  if (engineListOk) {
+    for (const [key, p] of Object.entries(prev)) {
+      if (
+        r2Map.has(key) &&
+        r2Map.get(key) === p.etag &&
+        !engineDocIds.has(p.doc_id)
+      ) {
+        tasks.push({ type: "upload", key });
+      }
+    }
+  }
   console.log(
     `[${engineName}] sync plan: ${tasks.length} tasks (${tasks.filter((t) => t.type === "delete").length} deletes, ${tasks.filter((t) => t.type === "upload").length} uploads)`,
   );
 
-  // 4. Enqueue chunks
+  // 5. Enqueue chunks
   for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
     const chunk = tasks.slice(i, i + CHUNK_SIZE);
     await env.SYNC_QUEUE.send({ chunk, engine: engineName });
