@@ -37,9 +37,7 @@ export class LightRagHandler {
   // -------------------------------------------------------------------------
   // listDocuments – flatten all status groups into a unified list
   // -------------------------------------------------------------------------
-  async listDocuments(
-    env: Env,
-  ): Promise<Array<{ id: string; title: string }>> {
+  async listDocuments(env: Env): Promise<Array<{ id: string; title: string }>> {
     const url = `${this.base(env)}/documents`;
 
     const res = await fetch(url, {
@@ -131,10 +129,7 @@ export class LightRagHandler {
     }
 
     const data = (await res.json()) as {
-      statuses: Record<
-        string,
-        Array<{ id: string; file_path: string }>
-      >;
+      statuses: Record<string, Array<{ id: string; file_path: string }>>;
     };
 
     // Find the doc_id matching this file_path
@@ -192,34 +187,43 @@ export class LightRagHandler {
   }
 
   // -------------------------------------------------------------------------
-  // uploadDocument – single file upload via multipart/form-data
+  // uploadDocument – upload via /documents/text with explicit file_path
+  //
+  // We use /documents/text instead of /documents/upload because
+  // FormData strips directory separators from filenames (R2 key
+  // "foo/bar.txt" → file_path "foobar.txt"), which breaks KV mapping.
+  // /documents/text accepts an explicit file_path alongside the text.
   // -------------------------------------------------------------------------
   async uploadDocument(
     key: string,
     buffer: ArrayBuffer,
     env: Env,
   ): Promise<string> {
-    const url = `${this.base(env)}/documents/upload`;
+    const url = `${this.base(env)}/documents/text`;
+    const text = new TextDecoder().decode(buffer);
 
-    const formData = new FormData();
-    // LightRAG expects the "file" field
-    formData.append("file", new Blob([buffer]), key);
-
-    const req = new Request(url, {
-      method: "POST",
-      body: formData,
+    const body = JSON.stringify({
+      text,
+      file_source: key, // preserve full R2 key including directory separators
     });
-    // Don't set Content-Type header – let the runtime auto-set
-    // multipart/form-data with boundary
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (env.LIGHTRAG_API_KEY) {
-      req.headers.set("X-API-Key", env.LIGHTRAG_API_KEY);
+      headers["X-API-Key"] = env.LIGHTRAG_API_KEY;
     }
 
-    const res = await fetch(req);
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body,
+    });
+
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      const bodyText = await res.text().catch(() => "");
       throw new Error(
-        `LightRAG upload failed: ${res.status} ${res.statusText} — ${body.slice(0, 300)}`,
+        `LightRAG upload failed: ${res.status} ${res.statusText} — ${bodyText.slice(0, 300)}`,
       );
     }
 
@@ -266,11 +270,7 @@ export class LightRagHandler {
         const f = files[i];
         if (!f) continue;
         try {
-          const document_id = await this.uploadDocument(
-            f.key,
-            f.buffer,
-            env,
-          );
+          const document_id = await this.uploadDocument(f.key, f.buffer, env);
           results.push({ key: f.key, document_id });
           console.log(
             `[lightrag] batch uploaded ${f.key} → doc_id=${document_id}`,
@@ -282,8 +282,9 @@ export class LightRagHandler {
     };
 
     // Launch concurrent workers
-    const workers = Array.from({ length: Math.min(CONCURRENCY, files.length) }, () =>
-      worker(),
+    const workers = Array.from(
+      { length: Math.min(CONCURRENCY, files.length) },
+      () => worker(),
     );
     await Promise.all(workers);
 
