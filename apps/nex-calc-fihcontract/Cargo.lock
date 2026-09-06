@@ -130,6 +130,7 @@ dependencies = [
  "async-trait",
  "log",
  "serde",
+ "serde_json",
  "sha2",
  "tagma-core",
 ]
