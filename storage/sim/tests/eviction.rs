@@ -13,7 +13,7 @@ use nex_fih::{
     AsyncEvictCapable, AsyncFactCapable, AsyncHintCapable, AsyncIntentCapable, AsyncStorageRead,
     Content, CoordId, Fact, FihStorage, Hint, Intent,
 };
-use nexus_storage_sim::{EntityStore, FileIo, SimIo};
+use nexus_storage_sim::{FileIo, SimIo};
 
 /// Clock start at exactly t=100s, far from the next second boundary even
 /// after the per-call step increments of the fake clock.

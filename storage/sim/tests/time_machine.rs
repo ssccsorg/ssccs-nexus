@@ -14,7 +14,7 @@ use nex_fih::{
     AsyncEvictCapable, AsyncFactCapable, AsyncFilterCapable, AsyncHintCapable, AsyncIntentCapable,
     AsyncStorageRead, Content, CoordId, Fact, Hint, Intent, StateFilter,
 };
-use nexus_storage_sim::{EntityStore, FihStorage, SimIo, SyncFileIo};
+use nexus_storage_sim::{FihStorage, SimIo, SyncFileIo};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
