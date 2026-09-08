@@ -7,10 +7,12 @@ set -euo pipefail
 # Sub-commands for focused tasks.
 #
 # Usage:
-#   ./run.sh               # Everything (default)
+#   ./run.sh               # Everything (default: core + gateway + apps + playbooks)
 #   ./run.sh --core        # Core checks only (nex, storage/*)
-#   ./run.sh --gateway     # Gateway layer checks (api, nex-cf, serde-proxy)
+#   ./run.sh --gateway     # Gateway layer checks (apps/nex-api, libs/serde-proxy)
 #   ./run.sh --apps        # All standalone app verification
+#   ./run.sh --server      # nex-server standalone verification
+#   ./run.sh --bench       # Run benchmarks (optional filter arg, e.g. --bench 2axis)
 #   ./run.sh --playbooks   # Consumer playbooks only
 #
 
@@ -582,7 +584,7 @@ case "${1:-}" in
         echo "Usage: $0 [OPTION]"
         echo "  (no arg)      Core + gateway + apps + playbooks [default]"
         echo "  --core        Core checks only (nex, storage/*)"
-        echo "  --gateway     Gateway layer checks (api, nex-cf, serde-proxy)"
+        echo "  --gateway     Gateway layer checks (apps/nex-api, libs/serde-proxy)"
         echo "  --apps        Standalone app verification (spinwasi, nex-tagma, ...)"
         echo "  --server      nex-server standalone verification"
         echo "  --bench       Run benchmarks (optional filter arg, e.g. --bench 2axis)"
