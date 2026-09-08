@@ -56,7 +56,6 @@ run_wasm_check() {
         fi
     done < <(find . -name Cargo.toml \
         -not -path './target/*' \
-        -not -path './ext/*' \
         -not -path './apps/*' \
         -not -path './verify/*' \
         -not -path './storage/ve-composite/*' \
