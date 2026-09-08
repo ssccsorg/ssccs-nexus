@@ -25,7 +25,7 @@ The FIH stack is split across repositories by layer. Each layer depends strictly
 | [syntagma](https://github.com/ssccsorg/syntagma) | Structural coordinate specification: `tagma-core` (Coord, CoordPath, CoordSpaceN) and `tagma-map`. no_std with alloc. |
 | [chton](https://github.com/ssccsorg/chton) | IO and storage materialization: `chton::io` (FileIo, IoFuture, FsIo, CoordMapStoreIo) and `chton::store`. no_std layering included. |
 | nexus (this repository) | Semantics, contracts, and runtime: `fih-model`, `nex-core`, `nex-fih`, `nex-io`, the `nex` process crate, `nexd`, `nex-server`, `nex-client`. |
-| [nex-ext](https://github.com/ssccsorg/nex-ext) | Adapters that attach host database engines to the network (for example the DuckDB and Cypher-backed cold query path). Consumes the cold query contract that lives in `fih-model`. |
+| [nex-ext](https://github.com/ssccsorg/nex-ext) | Engines and external solution tier: host database engine adapters (the DuckDB and Cypher-backed cold query path), the external engine runner harness (`ext/`, Python docker runners for LightRAG, Graphiti, Memgraph, EdgeQuake), and the Cloudflare sync workers (`gateway/`, af-sync and module-hub). Consumes the cold query contract that lives in `fih-model`. |
 
 The ecosystem rule is that contracts live in the stable core, not in implementations. A consumer implements a published trait (for example `FileIo`) in its own workspace and plugs it in; the core never depends on a specific backend.
 
@@ -59,7 +59,7 @@ The `nex/` workspace:
 | `nex/fih/` | `nex-fih` | The storage implementation layer: `FihStorage<I: FileIo>`, record maps, the structural filter index, semantic store registration, and re-exports of `fih-model`. no_std with a `std` default feature. |
 | `nex/process/` | `nex` | The process layer: OODA scheduler, detection tasks, eviction, plus the backward-compatible alias surface (`nex::storage::core::FihStorage`, `nex::storage::semantic`, `nex::io`, top-level `FileIo`, `FsIo`). |
 
-Standalone applications with their own workspaces and verifiers live under `apps/` (`nex-api`, `nex-calc-fihcontract`, `nex-spinwasi-ssccsdocs`, `nex-tagma`, `nex-wasmer-ssccsdocs`). Edge sync modules live under `gateway/`. The `docs/` directory holds the devlogs that record architectural decisions.
+Standalone applications with their own workspaces and verifiers live under `apps/` (`nex-api`, `nex-calc-fihcontract`, `nex-spinwasi-ssccsdocs`, `nex-tagma`, `nex-wasmer-ssccsdocs`). The `docs/` directory holds the devlogs that record architectural decisions. The external engine runner harness and the edge sync workers that previously lived under `ext/` and `gateway/` now live in nex-ext.
 
 ## Getting Started
 
@@ -160,7 +160,7 @@ GitHub Actions runs on push to `main` and on pull requests:
 
 - Core: fmt, clippy, tests, the wasm32 gate, and the MCU runtime verification under QEMU in Docker.
 - Server: `nex-server` and `nex-client` verification over a Unix socket.
-- Gateway: the HTTP API and edge sync modules.
+- Gateway: the HTTP API (`apps/nex-api`) and the serialization proxy (`libs/serde-proxy`).
 - Apps: standalone app verifiers (spin-wasi reference, `nex-calc`, `nexd` lifecycle, tagma consumer).
 - Playbooks: consumer playbook scenarios.
 
